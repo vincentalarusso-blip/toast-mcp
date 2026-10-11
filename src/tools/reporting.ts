@@ -17,6 +17,15 @@ const liveChecks = (order: Order): Check[] =>
     ? []
     : (order.checks || []).filter(c => !isDeleted(c) && !isVoided(c));
 
+// Gift card sales/reloads and house-account payments ride on a check and are
+// included in check.amount, but they are not revenue. Toast's Sales Summary
+// leaves them out of net sales, so every sales figure subtracts them.
+const NON_SALES_TYPES = new Set(['TOAST_CARD_SELL', 'TOAST_CARD_RELOAD', 'HOUSE_ACCOUNT_PAY_BALANCE']);
+const isNonSales = (sel: any) => !sel?.voided && NON_SALES_TYPES.has(sel?.selectionType);
+const nonSalesAmount = (check: Check): number =>
+  ((check as any).selections || []).reduce((s: number, sel: any) => s + (isNonSales(sel) ? (sel.price || 0) : 0), 0);
+const netOf = (check: Check): number => (check.amount || 0) - nonSalesAmount(check);
+
 // Hours must be bucketed in the restaurant's own time zone, not the server's
 // (Railway runs in UTC, which pushed dinner into the 22:00-23:00 buckets).
 const tzCache = new Map<string, string>();
@@ -71,6 +80,7 @@ export function registerReportingTools(client: ToastClient) {
         let checkCount = 0;
         let deletedCheckCount = 0;
         let deletedAmount = 0;
+        let nonSales = 0;
 
         orders.forEach(order => {
           if (isDeleted(order)) {
@@ -97,7 +107,8 @@ export function registerReportingTools(client: ToastClient) {
             // and item-level discounts. Start there, then add every discount
             // back into gross so gross - discounts = net (issue #1: check-level
             // discounts used to be subtracted a second time).
-            grossSales += check.amount || 0;
+            grossSales += netOf(check);
+            nonSales += nonSalesAmount(check);
             taxAmount += check.taxAmount || 0;
             totalSales += check.totalAmount || 0;
 
@@ -146,6 +157,7 @@ export function registerReportingTools(client: ToastClient) {
           checkCount,
           excludedDeletedChecks: deletedCheckCount,
           excludedDeletedAmount: deletedAmount,
+          excludedGiftCardAndHouseAccount: nonSales,
           averageCheck: checkCount > 0 ? netSales / checkCount : 0,
           averageGuestSpend: guestCount > 0 ? netSales / guestCount : 0,
         };
@@ -184,7 +196,7 @@ export function registerReportingTools(client: ToastClient) {
           b.orders++;
           b.guests += order.numberOfGuests || 0;
           checks.forEach(check => {
-            b.sales += check.amount || 0;            // net: after discounts, before tax and tips
+            b.sales += netOf(check);                 // net: after discounts, before tax and tips
             b.totalSales += check.totalAmount || 0;  // incl. tax (and any amount Toast rolls into total)
           });
         });
@@ -228,7 +240,7 @@ export function registerReportingTools(client: ToastClient) {
         orders.forEach(order => {
           liveChecks(order).forEach(check => {
             (check.selections || []).forEach((selection: any) => {
-              if (selection.voided) return;
+              if (selection.voided || isNonSales(selection)) return;
 
               // Group on the menu item reference guid (selections carry the item
               // as a reference object, not a flat itemGuid), falling back to the
