@@ -482,6 +482,20 @@ export class DashboardSync {
       this.running = false;
       this.state.current = '';
     }
+    this.logReport();
+  }
+  /** One log line per location after the queue drains: name sources, names, monthly net/guests. */
+  logReport() {
+    for (const loc of this.locations) {
+      const c = this.cfg.get(loc.guid);
+      const months: Record<string, [number, number]> = {};
+      for (const r of this.days.get(loc.guid)!.values()) {
+        const k = String(r.d).slice(0, 6);
+        const m = (months[k] ??= [0, 0]);
+        m[0] = r2(m[0] + r.agg.t.net); m[1] += r.agg.t.guests;
+      }
+      console.error(`[dashboard] report ${JSON.stringify({ loc: loc.name, sources: c?.sources, rc: c?.rc, area: c?.area, service: c?.service, cats: Object.values(c?.cat || {}), months })}`);
+    }
   }
   begin() {
     const cycle = async () => {
