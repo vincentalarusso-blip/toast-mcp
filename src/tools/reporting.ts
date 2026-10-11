@@ -1,10 +1,43 @@
 ﻿import { z } from 'zod';
 import { ToastClient } from '../clients/toast.js';
-import type { Order, MenuItemSales } from '../types/index.js';
+import type { Order, Check, MenuItemSales } from '../types/index.js';
 
 /**
  * Reporting & Analytics Tools
  */
+
+// Toast keeps deleted orders/checks (e.g. a check opened in error and deleted
+// while still OPEN) in ordersBulk. Toast's own Sales Summary leaves them out,
+// so every report must skip them. Voided orders/checks are excluded from sales
+// and reported separately as voids.
+const isDeleted = (x: any) => !!x?.deleted;
+const isVoided = (x: any) => !!x?.voided;
+const liveChecks = (order: Order): Check[] =>
+  isDeleted(order) || isVoided(order)
+    ? []
+    : (order.checks || []).filter(c => !isDeleted(c) && !isVoided(c));
+
+// Hours must be bucketed in the restaurant's own time zone, not the server's
+// (Railway runs in UTC, which pushed dinner into the 22:00-23:00 buckets).
+const tzCache = new Map<string, string>();
+export async function restaurantTimeZone(client: ToastClient, restaurantGuid: string): Promise<string> {
+  const cached = tzCache.get(restaurantGuid);
+  if (cached) return cached;
+  let tz: string | undefined;
+  try {
+    const r: any = await client.get(`/restaurants/v1/restaurants/${restaurantGuid}`, { restaurantGuid });
+    tz = r?.general?.timeZone || r?.timeZone;
+  } catch {
+    // fall through to the configured default
+  }
+  tz = tz || process.env.TOAST_TIMEZONE || 'America/New_York';
+  tzCache.set(restaurantGuid, tz);
+  return tz;
+}
+export function localHour(iso: string, timeZone: string): number {
+  const h = new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', hourCycle: 'h23' }).format(new Date(iso));
+  return Number(h) % 24;
+}
 
 export function registerReportingTools(client: ToastClient) {
   return [
@@ -36,17 +69,30 @@ export function registerReportingTools(client: ToastClient) {
         let refundAmount = 0;
         let guestCount = 0;
         let checkCount = 0;
+        let deletedCheckCount = 0;
+        let deletedAmount = 0;
 
         orders.forEach(order => {
+          if (isDeleted(order)) {
+            order.checks?.forEach(check => { deletedCheckCount++; deletedAmount += check.amount || 0; });
+            return;
+          }
           if (order.voided) {
             voidAmount += order.checks.reduce((sum, check) => sum + (check.totalAmount || 0), 0);
             return;
           }
 
-          guestCount += order.numberOfGuests || 0;
-          checkCount += order.checks.length;
-
           order.checks.forEach(check => {
+            if (isDeleted(check)) { deletedCheckCount++; deletedAmount += check.amount || 0; }
+            else if (isVoided(check)) voidAmount += check.totalAmount || 0;
+          });
+          const checks = liveChecks(order);
+          if (!checks.length) return;
+
+          guestCount += order.numberOfGuests || 0;
+          checkCount += checks.length;
+
+          checks.forEach(check => {
             // check.amount is Toast's net: already reduced by BOTH check-level
             // and item-level discounts. Start there, then add every discount
             // back into gross so gross - discounts = net (issue #1: check-level
@@ -98,6 +144,8 @@ export function registerReportingTools(client: ToastClient) {
           refundAmount,
           guestCount,
           checkCount,
+          excludedDeletedChecks: deletedCheckCount,
+          excludedDeletedAmount: deletedAmount,
           averageCheck: checkCount > 0 ? netSales / checkCount : 0,
           averageGuestSpend: guestCount > 0 ? netSales / guestCount : 0,
         };
@@ -122,31 +170,31 @@ export function registerReportingTools(client: ToastClient) {
           }
         );
 
-        const hourlyData: Record<number, { sales: number; orders: number; guests: number }> = {};
+        const timeZone = await restaurantTimeZone(client, restGuid);
+        type Bucket = { sales: number; totalSales: number; orders: number; guests: number };
+        const empty = (): Bucket => ({ sales: 0, totalSales: 0, orders: 0, guests: 0 });
+        const hourlyData: Record<number, Bucket> = {};
 
         orders.forEach(order => {
-          if (order.voided) return;
+          const checks = liveChecks(order);
+          if (!checks.length) return;
 
-          const hour = new Date(order.openedDate).getHours();
-          if (!hourlyData[hour]) {
-            hourlyData[hour] = { sales: 0, orders: 0, guests: 0 };
-          }
-
-          hourlyData[hour].orders++;
-          hourlyData[hour].guests += order.numberOfGuests || 0;
-
-          order.checks.forEach(check => {
-            hourlyData[hour].sales += check.totalAmount || 0;
+          const hour = localHour(order.openedDate, timeZone);
+          const b = (hourlyData[hour] ??= empty());
+          b.orders++;
+          b.guests += order.numberOfGuests || 0;
+          checks.forEach(check => {
+            b.sales += check.amount || 0;            // net: after discounts, before tax and tips
+            b.totalSales += check.totalAmount || 0;  // incl. tax (and any amount Toast rolls into total)
           });
         });
 
-        const hourlyArray = Array.from({ length: 24 }, (_, hour) => ({
-          hour,
-          ...( hourlyData[hour] || { sales: 0, orders: 0, guests: 0 }),
-        }));
+        const hourlyArray = Array.from({ length: 24 }, (_, hour) => ({ hour, ...(hourlyData[hour] || empty()) }));
 
         return {
           businessDate: args.businessDate,
+          timeZone,
+          salesBasis: 'net (check amount after discounts, before tax and tips)',
           hourlyBreakdown: hourlyArray,
         };
       },
@@ -178,10 +226,8 @@ export function registerReportingTools(client: ToastClient) {
         const itemSales = new Map<string, MenuItemSales>();
 
         orders.forEach(order => {
-          if (order.voided) return;
-
-          order.checks.forEach(check => {
-            check.selections.forEach(selection => {
+          liveChecks(order).forEach(check => {
+            (check.selections || []).forEach((selection: any) => {
               if (selection.voided) return;
 
               // Group on the menu item reference guid (selections carry the item
@@ -248,7 +294,9 @@ export function registerReportingTools(client: ToastClient) {
         const paymentTypes: Record<string, { amount: number; tipAmount: number; count: number }> = {};
 
         orders.forEach(order => {
+          if (isDeleted(order)) return;
           order.checks.forEach(check => {
+            if (isDeleted(check)) return;
             check.payments?.forEach(payment => {
               const type = payment.type || 'UNKNOWN';
               if (!paymentTypes[type]) {
@@ -308,7 +356,7 @@ export function registerReportingTools(client: ToastClient) {
         };
 
         orders.forEach(order => {
-          order.checks.forEach(check => {
+          liveChecks(order).forEach(check => {
             check.appliedDiscounts?.forEach(record);
             // Item-level comps (loyalty rewards, single-item discounts) live on
             // the selection, not the check. Count both.

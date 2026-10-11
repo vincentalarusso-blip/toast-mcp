@@ -17,7 +17,8 @@ export function registerRestaurantTools(client: ToastClient) {
       handler: async (args: { restaurantGuid?: string }) => {
         const restGuid = args.restaurantGuid || client.getRestaurantGuid();
         const restaurant = await client.get<Restaurant>(
-          `/restaurants/v1/restaurants/${restGuid}`
+          `/restaurants/v1/restaurants/${restGuid}`,
+          { restaurantGuid: restGuid }
         );
         return { restaurant };
       },
@@ -44,7 +45,8 @@ export function registerRestaurantTools(client: ToastClient) {
       handler: async (args: { restaurantGuid?: string }) => {
         const restGuid = args.restaurantGuid || client.getRestaurantGuid();
         const restaurant = await client.get<Restaurant>(
-          `/restaurants/v1/restaurants/${restGuid}`
+          `/restaurants/v1/restaurants/${restGuid}`,
+          { restaurantGuid: restGuid }
         );
         return { tables: restaurant.tables || [], count: restaurant.tables?.length || 0 };
       },
@@ -60,7 +62,8 @@ export function registerRestaurantTools(client: ToastClient) {
       handler: async (args: { tableGuid: string; restaurantGuid?: string }) => {
         const restGuid = args.restaurantGuid || client.getRestaurantGuid();
         const restaurant = await client.get<Restaurant>(
-          `/restaurants/v1/restaurants/${restGuid}`
+          `/restaurants/v1/restaurants/${restGuid}`,
+          { restaurantGuid: restGuid }
         );
         
         const table = restaurant.tables?.find(t => t.guid === args.tableGuid);
@@ -81,7 +84,8 @@ export function registerRestaurantTools(client: ToastClient) {
       handler: async (args: { restaurantGuid?: string }) => {
         const restGuid = args.restaurantGuid || client.getRestaurantGuid();
         const restaurant = await client.get<Restaurant>(
-          `/restaurants/v1/restaurants/${restGuid}`
+          `/restaurants/v1/restaurants/${restGuid}`,
+          { restaurantGuid: restGuid }
         );
         return { serviceAreas: restaurant.serviceAreas || [], count: restaurant.serviceAreas?.length || 0 };
       },
@@ -96,7 +100,8 @@ export function registerRestaurantTools(client: ToastClient) {
       handler: async (args: { restaurantGuid?: string }) => {
         const restGuid = args.restaurantGuid || client.getRestaurantGuid();
         const restaurant = await client.get<Restaurant>(
-          `/restaurants/v1/restaurants/${restGuid}`
+          `/restaurants/v1/restaurants/${restGuid}`,
+          { restaurantGuid: restGuid }
         );
         return { diningOptions: restaurant.diningOptions || [], count: restaurant.diningOptions?.length || 0 };
       },
@@ -111,7 +116,8 @@ export function registerRestaurantTools(client: ToastClient) {
       handler: async (args: { restaurantGuid?: string }) => {
         const restGuid = args.restaurantGuid || client.getRestaurantGuid();
         const restaurant = await client.get<Restaurant>(
-          `/restaurants/v1/restaurants/${restGuid}`
+          `/restaurants/v1/restaurants/${restGuid}`,
+          { restaurantGuid: restGuid }
         );
         return { revenueCenters: restaurant.revenuecenters || [], count: restaurant.revenuecenters?.length || 0 };
       },
@@ -126,7 +132,8 @@ export function registerRestaurantTools(client: ToastClient) {
       handler: async (args: { restaurantGuid?: string }) => {
         const restGuid = args.restaurantGuid || client.getRestaurantGuid();
         const restaurant = await client.get<Restaurant>(
-          `/restaurants/v1/restaurants/${restGuid}`
+          `/restaurants/v1/restaurants/${restGuid}`,
+          { restaurantGuid: restGuid }
         );
         
         return {
@@ -145,7 +152,8 @@ export function registerRestaurantTools(client: ToastClient) {
       handler: async (args: { restaurantGuid?: string }) => {
         const restGuid = args.restaurantGuid || client.getRestaurantGuid();
         const restaurant = await client.get<Restaurant>(
-          `/restaurants/v1/restaurants/${restGuid}`
+          `/restaurants/v1/restaurants/${restGuid}`,
+          { restaurantGuid: restGuid }
         );
         
         return {
