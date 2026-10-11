@@ -236,8 +236,8 @@ export class DashboardSync {
   private queued = new Set<string>();
   private running = false;
   private lastCall = 0;
-  private summary?: { json: Buffer; gz: Buffer; etag: string };
-  private months = new Map<string, { json: Buffer; gz: Buffer; etag: string }>();
+  private summary?: { json: Buffer; gz: Buffer; etag: string; obj: any };
+  private months = new Map<string, { json: Buffer; gz: Buffer; etag: string; obj: any }>();
   private dirtyMonths = new Set<string>();
   private dirty = true;
   readonly state = {
@@ -517,7 +517,38 @@ export class DashboardSync {
   }
   private pack(obj: any) {
     const json = Buffer.from(JSON.stringify(obj));
-    return { json, gz: zlib.gzipSync(json), etag: `"${Date.now().toString(36)}-${json.length.toString(36)}"` };
+    return { json, gz: zlib.gzipSync(json), etag: `"${Date.now().toString(36)}-${json.length.toString(36)}"`, obj };
+  }
+  /**
+   * The same data as /dashboard/data.json and /dashboard/items/YYYYMM.json, in pieces small
+   * enough for an MCP tool result (used by the dashboard when it runs inside Claude).
+   *  part "meta": everything but the row arrays, plus the months available and the build etag.
+   *  part "summary" + month: that month's days/seg/cat/hrs rows (indexes into meta.dict).
+   *  part "items" + month + page: item rows for the month, ITEM_PAGE rows per page, with that month's dict.
+   */
+  dataPart(input: { part: string; month?: string; page?: number }) {
+    const S = this.buildSummary();
+    const o = S.obj;
+    if (input.part === 'meta') {
+      const months = [...new Set((o.days as any[]).map(r => String(r[0]).slice(0, 6)))].sort();
+      const { days, seg, cat, hrs, ...meta } = o;
+      return { ...meta, etag: S.etag, months, rows: { days: days.length, seg: seg.length, cat: cat.length, hrs: hrs.length } };
+    }
+    const month = String(input.month || '');
+    if (!/^\d{6}$/.test(month)) throw new Error('month must be YYYYMM');
+    if (input.part === 'summary') {
+      const m = Number(month);
+      const pick = (rows: any[]) => rows.filter(r => Math.floor(r[0] / 100) === m);
+      return { etag: S.etag, month, days: pick(o.days), seg: pick(o.seg), cat: pick(o.cat), hrs: pick(o.hrs) };
+    }
+    if (input.part === 'items') {
+      const M = this.buildMonth(month);
+      const ITEM_PAGE = 12000;
+      const page = Math.max(0, Math.floor(input.page || 0));
+      const rows = M.obj.rows as any[];
+      return { etag: M.etag, month, page, pages: Math.max(1, Math.ceil(rows.length / ITEM_PAGE)), cols: M.obj.cols, dict: M.obj.dict, rows: rows.slice(page * ITEM_PAGE, (page + 1) * ITEM_PAGE) };
+    }
+    throw new Error('part must be meta, summary or items');
   }
   buildSummary() {
     if (this.summary && !this.dirty) return this.summary;
@@ -694,6 +725,29 @@ export function mountDashboardRoutes(app: any) {
     if (!/^\d{6}$/.test(month)) { res.status(400).json({ error: 'month must be YYYYMM' }); return; }
     try { send(req, res, engine!.buildMonth(month)); } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
   });
+  // The dashboard page itself, built into the repo at dashboard/index.html. Same key as the data.
+  const pageFile = path.resolve(process.env.DASHBOARD_PAGE || 'dashboard/index.html');
+  const page = (req: any, res: any) => {
+    const key = process.env.DASHBOARD_KEY;
+    if (!key || key.length < 16) { res.status(503).send('DASHBOARD_KEY is not set'); return; }
+    if ((req.query?.key || '') !== key) { res.status(401).type('text/plain').send('Add ?key=… to the address to open the dashboard.'); return; }
+    let st: fs.Stats;
+    try { st = fs.statSync(pageFile); } catch { res.status(404).type('text/plain').send('The dashboard page is not deployed yet.'); return; }
+    const etag = `"p${st.mtimeMs.toString(36)}-${st.size.toString(36)}"`;
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('ETag', etag);
+    res.setHeader('X-Robots-Tag', 'noindex');
+    if (req.headers['if-none-match'] === etag) { res.status(304).end(); return; }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    const buf = fs.readFileSync(pageFile);
+    if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) { res.setHeader('Content-Encoding', 'gzip'); res.setHeader('Vary', 'Accept-Encoding'); res.end(zlib.gzipSync(buf)); }
+    else res.end(buf);
+  };
+  app.get('/dashboard/', page);
+  app.get('/dashboard', (req: any, res: any) => {
+    const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    res.redirect(302, '/dashboard/' + q);
+  });
   app.get('/dashboard/status', (_req: any, res: any) => {
     cors(res);
     if (!engine) { res.status(503).json({ running: false }); return; }
@@ -717,6 +771,20 @@ export function registerDashboardTools(_client: ToastClient) {
       handler: async (args: { months?: boolean; date?: number }) => {
         if (!engine) return { running: false, message: 'Dashboard sync runs only in http mode with DASHBOARD_SYNC not set to off.' };
         return engine.status(args);
+      },
+    },
+    {
+      name: 'toast_dashboard_data',
+      compact: true,
+      description: 'Data for the F&B Sales dashboard, in pieces. part="meta" first (locations, names, months, etag), then part="summary" with month=YYYYMM for each month, and part="items" with month and page (0..pages-1) for item sales. Read-only.',
+      inputSchema: z.object({
+        part: z.string().describe('meta | summary | items'),
+        month: z.string().optional().describe('YYYYMM (summary, items)'),
+        page: z.number().optional().describe('items page, from 0'),
+      }),
+      handler: async (args: { part: string; month?: string; page?: number }) => {
+        if (!engine) return { error: 'dashboard sync is not running' };
+        return engine.dataPart(args);
       },
     },
     {

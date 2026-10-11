@@ -2,6 +2,14 @@
 
 Check your deployed version at `https://<your-domain>/health`.
 
+## 1.4.0 (2026-10-11)
+
+- **`toast_dashboard_data`** (MCP tool): the dashboard feed in pieces small enough for a tool
+  result (`meta`, then `summary` per month, then `items` per month and page), so the dashboard
+  can run as a pinned Claude page through the Toast connector. Results are sent compact.
+- **`GET /dashboard/?key=…`** serves the dashboard page from `dashboard/index.html` in the
+  deployed repo (override with `DASHBOARD_PAGE`), behind the same `DASHBOARD_KEY`.
+
 ## 1.3.0 (2026-10-11)
 
 - **F&B dashboard sync** (`src/tools/dashboard.ts`, http mode). The server keeps

@@ -117,3 +117,19 @@ test('sync: backfills from first business date, marks current day partial, serve
   const again = new DashboardSync(client, { dir, locations: [{ guid: 'L1', name: 'Test Outlet' }], start: '2026-01-01' });
   close(JSON.parse(again.buildSummary().json).days.find(r => r[0] === 20261009)[2], 110);
 });
+
+test('dataPart splits the summary by month and pages items, and the pieces add back up', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dash-'));
+  const sync = new DashboardSync(fakeClient({ 20261009: orders }), { dir, locations: [{ guid: 'L1', name: 'Test Outlet' }], start: '2026-01-01' });
+  await sync.planCycle(); await sync.work();
+  const meta = sync.dataPart({ part: 'meta' });
+  assert.ok(meta.etag && meta.months.includes('202610') && !meta.days);
+  const full = JSON.parse(sync.buildSummary().json);
+  const parts = meta.months.map(m => sync.dataPart({ part: 'summary', month: m }));
+  assert.equal(parts.reduce((s, p) => s + p.days.length, 0), full.days.length);
+  assert.equal(parts.reduce((s, p) => s + p.cat.length, 0), full.cat.length);
+  const items = sync.dataPart({ part: 'items', month: '202610', page: 0 });
+  assert.equal(items.pages, 1);
+  assert.equal(items.rows.length, 2);
+  assert.throws(() => sync.dataPart({ part: 'summary', month: '2026' }));
+});

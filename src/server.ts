@@ -69,7 +69,7 @@ export class ToastMCPServer {
     this.server = new Server(
       {
         name: 'toast-mcp by PrimeCost (Chris Cusack — chriscusack.net)',
-        version: '1.3.0',
+        version: '1.4.0',
       },
       {
         capabilities: {
@@ -310,7 +310,8 @@ export class ToastMCPServer {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(result, null, 2),
+              // Large data tools (toast_dashboard_data) set compact: pretty-printing row arrays triples their size.
+              text: tool.compact ? JSON.stringify(result) : JSON.stringify(result, null, 2),
             },
           ],
         };
