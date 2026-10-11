@@ -2,6 +2,56 @@
 
 Check your deployed version at `https://<your-domain>/health`.
 
+## 1.3.0 (2026-10-11)
+
+- **F&B dashboard sync** (`src/tools/dashboard.ts`, http mode). The server keeps
+  its own store of daily Toast sales per location on disk (`DATA_DIR`, default
+  `/data`, a Railway volume) and serves it to the dashboard:
+  - backfills every business date from `DASHBOARD_START` (default 2026-01-01) once,
+    newest first;
+  - every `DASHBOARD_REFRESH_HOURS` (default 4) pulls today's business date only;
+  - after each closeout, pulls the day that just closed one final time; final days
+    are not pulled again unless `toast_dashboard_refresh` asks for them.
+  - Stores net, gross, discounts, tax, tips, service charges, gift cards, guests,
+    checks, plus net by revenue center, service area, daypart and sales category,
+    net by hour, and item quantities and net. Item net + service charges = net.
+  - `GET /dashboard/data.json` and `GET /dashboard/items/YYYYMM.json` (need
+    `DASHBOARD_KEY` as `?key=` or `x-dashboard-key`), gzip, ETag, CORS.
+    `GET /dashboard/status` is public and has no sales figures.
+  - MCP tools `toast_dashboard_status` and `toast_dashboard_refresh`.
+  - Locations default to the CMH list; override with `DASHBOARD_LOCATIONS`
+    (JSON `[{"guid","name"}]`). `DASHBOARD_SYNC=off` disables it.
+
+## 1.2.4 (2026-10-11)
+
+- **Gift card sales and reloads and house-account payments are not net sales.**
+  They ride on a check and are included in `check.amount`, but Toast's Sales
+  Summary leaves them out. The sales summary, hourly and item reports now
+  subtract them; the summary reports them as `excludedGiftCardAndHouseAccount`.
+  Verified: Sister Ship 2026-10-09 now $11,355.07, matching Toast Web.
+
+## 1.2.3 (2026-10-11)
+
+- **Deleted orders and checks no longer count as sales.** Toast keeps them in
+  `ordersBulk` (for example a check opened in error and deleted while still
+  OPEN), but Toast's own Sales Summary leaves them out. `toast_get_sales_summary`,
+  `toast_get_hourly_sales`, `toast_get_item_sales_report`,
+  `toast_get_discount_report` and `toast_get_payment_type_report` now skip
+  them. Voided checks inside a live order are moved to `voidAmount`. The sales
+  summary reports what it excluded in `excludedDeletedChecks` and
+  `excludedDeletedAmount`. Verified on live data: Swim Club, 2026-10-09 now
+  returns $1,846.23 net and 49 guests, matching Toast Web (was $1,871.98 / 50).
+- **`toast_get_hourly_sales` reports net sales in the restaurant's time zone.**
+  `sales` is now the check amount (after discounts, before tax and tips);
+  the old tax-inclusive figure is kept as `totalSales`. Hours are bucketed in
+  the restaurant's configured time zone instead of the server clock (UTC on
+  Railway, which pushed dinner into 22:00-23:00). Falls back to
+  `TOAST_TIMEZONE`, then `America/New_York`. The response includes `timeZone`.
+- **Restaurant tools honor `restaurantGuid`.** `toast_get_restaurant_info`,
+  `toast_list_tables`, `toast_get_table`, service areas, dining options and
+  revenue centers ignored the per-call GUID and always queried the default
+  location.
+
 ## 1.2.2 (2026-10-08)
 
 - **Menu tools now read the real Menus v2 shape.** 1.2.1 unwrapped the

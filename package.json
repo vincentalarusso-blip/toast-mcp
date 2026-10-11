@@ -1,6 +1,6 @@
 {
   "name": "@busybee3333/toast-mcp-server",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "Complete MCP server for Toast restaurant POS/management platform with 50+ tools and 18 React apps",
   "type": "module",
   "main": "dist/main.js",

@@ -92,6 +92,12 @@ async function main() {
         environment: config.environment,
       }).getClient();
 
+      // F&B dashboard sync: backfills and refreshes Toast sales on a schedule
+      // and serves them at /dashboard/* (see src/tools/dashboard.ts).
+      const { startDashboardSync, mountDashboardRoutes } = await import('./tools/dashboard.js');
+      startDashboardSync(sharedClient);
+      mountDashboardRoutes(app);
+
       const handleMcp = async (req: any, res: any) => {
         try {
           // Stateless: fresh server + transport per request, shared Toast client.
@@ -146,7 +152,7 @@ async function main() {
 
       // Health check (no secret required, reveals nothing sensitive)
       app.get('/health', (_req, res) => {
-        res.json({ status: 'ok', service: 'toast-mcp-server', version: '1.2.2' });
+        res.json({ status: 'ok', service: 'toast-mcp-server', version: '1.3.0' });
       });
 
       const port = config.port || 3000;

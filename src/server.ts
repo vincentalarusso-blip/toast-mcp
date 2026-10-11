@@ -16,6 +16,7 @@ import { registerInventoryTools } from './tools/inventory.js';
 import { registerCustomersTools } from './tools/customers.js';
 import { registerReportingTools } from './tools/reporting.js';
 import { registerCashTools } from './tools/cash.js';
+import { registerDashboardTools } from './tools/dashboard.js';
 
 /**
  * Toast MCP Server - Complete restaurant POS/management platform integration
@@ -68,7 +69,7 @@ export class ToastMCPServer {
     this.server = new Server(
       {
         name: 'toast-mcp by PrimeCost (Chris Cusack — chriscusack.net)',
-        version: '1.2.2',
+        version: '1.3.0',
       },
       {
         capabilities: {
@@ -117,6 +118,7 @@ export class ToastMCPServer {
       registerCustomersTools(this.client),
       registerReportingTools(this.client),
       registerCashTools(this.client),
+      registerDashboardTools(this.client),
     ];
 
     const enableWrites = process.env.TOAST_ENABLE_WRITE_TOOLS === 'true';
