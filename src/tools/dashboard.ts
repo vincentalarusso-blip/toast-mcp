@@ -385,6 +385,7 @@ export class DashboardSync {
     } catch (e: any) { cfg.sources.menus = `error: ${e?.message || e}`; }
     this.cfg.set(loc.guid, cfg);
     this.writeJson(path.join(this.dir, 'config', `${loc.guid}.json`), cfg);
+    console.error(`[dashboard] names ${loc.name}: ${Object.entries(cfg.sources).map(([k, v]) => `${k} ${v}`).join('; ')}`);
     this.dirty = true;
     return cfg;
   }
@@ -473,6 +474,9 @@ export class DashboardSync {
         this.state.current = `${loc.name} ${job.d} (${job.why})`;
         try { await this.pullDay(loc, job.d, job.final); }
         catch (e) { this.state.failed++; this.err(`pull ${loc.name} ${job.d}`, e); }
+        if ((this.state.fetched + this.state.failed) % 100 === 0 || (!this.urgent.length && !this.backfill.length)) {
+          console.error(`[dashboard] progress: ${this.state.fetched} pulled, ${this.state.failed} failed, ${this.urgent.length} urgent + ${this.backfill.length} backfill left; ${this.state.requests} Toast calls; last ${loc.name} ${job.d}`);
+        }
       }
     } finally {
       this.running = false;
